@@ -65,6 +65,50 @@ int create_game_server(unsigned short port,
     return 0;
 }
 
+void send_msg_to_client(game_client_t* client, unsigned char type, char* payload, size_t payload_len)
+{
+	const size_t header_size = sizeof(sg_header_t);
+	sg_header_t header_buffer;
+
+	const size_t small_msg_size = 1024;
+	char small_msg_buffer[small_msg_size];
+
+	// Use the stack buffer to compose message if it's big enough, otherwise 
+	// allocate RAM dynamically to put it in
+	char* data;
+	size_t message_size = header_size + payload_len;
+	if(message_size > small_msg_size)
+	{
+		data = malloc(message_size);	
+	}
+	else 
+	{
+		data = small_msg_buffer;
+		memset(data, 0, small_msg_size);
+	}
+
+	// Fill header values
+	memcpy(&(header_buffer.magic), PROTOCOL_MAGIC, strlen(PROTOCOL_MAGIC));
+	memcpy(&(header_buffer.username), SERVER_UNAME, strlen(SERVER_UNAME));
+	memcpy(&(header_buffer.secret), SERVER_SECRET, strlen(SERVER_SECRET));
+
+	header_buffer.message_type = type;
+
+	// Create message
+	memcpy(data, &header_buffer, header_size);
+	memcpy(data + header_size, payload, payload_len);
+
+	// Send message
+	// TODO: Make sure that the whole message has been sent
+	send(client->_sockfd, data, message_size, 0);
+
+	// Free RAM if it was dynamically allocated
+	if(data != small_msg_buffer) 
+	{
+		free(data);
+	}		
+}
+
 void* _server_communication_routine(game_server_t* game_server)
 {
 	const size_t header_size = sizeof(sg_header_t);

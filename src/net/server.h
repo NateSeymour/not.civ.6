@@ -13,6 +13,8 @@
 
 // Server magic
 #define PROTOCOL_MAGIC "BOATSANDHOES"
+#define SERVER_UNAME "SERVER"
+#define SERVER_SECRET "SERVER"
 
 // pthread routine
 typedef void*(*pthread_routine_t)(void*);
@@ -20,7 +22,7 @@ typedef void*(*pthread_routine_t)(void*);
 // Net headers
 typedef struct __attribute__((__packed__)) {
     char magic[12];
-    char message_type;
+    unsigned char message_type;
     short message_length;
     
     char username[20];
@@ -73,5 +75,6 @@ int create_game_server(unsigned short port,
         game_server_t** out);
 int start_game_server(game_server_t* game_server);
 void destroy_game_server(game_server_t* game_server);
+void send_msg_to_client(game_client_t* client, unsigned char type, char* payload, size_t payload_len);
 
 #endif // _SERVER_H_

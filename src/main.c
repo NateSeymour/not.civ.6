@@ -4,6 +4,7 @@
 
 #include "main.h"
 #include "net/server.h"
+#include "game/message.h"
 
 void conn_callback(game_client_t* client) 
 {
@@ -34,6 +35,15 @@ void data_callback(game_client_t* client, sg_message_t* data)
 	inet_ntop(addr->sin_family, &(addr->sin_addr), client_host_str, INET6_ADDRSTRLEN);
 
 	printf("Data (%s): %s\n", client_host_str, data->payload);
+
+	switch(data->header.message_type)
+	{
+		case MSG_COMMSCHECK: 
+		{
+			send_msg_to_client(client, MSG_COMMSCHECK, "OK", 2);
+			break;	
+		}
+	}
 }
 
 int main() 
