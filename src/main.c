@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <lua.h>
+#include <lualib.h>
 
 #include "main.h"
 #include "net/server.h"
@@ -27,29 +29,27 @@ void disc_callback(game_client_t* client)
 	printf("Client has disconnected from: %s\n", client_host_str);
 }
 
-void data_callback(game_client_t* client, sg_message_t* data)
+void data_callback(game_client_t* client, sg_message_t* msg)
 {
 	char client_host_str[INET6_ADDRSTRLEN];
 
 	struct sockaddr_in* addr = (struct sockaddr_in*)&(client->_addr_info);
 	inet_ntop(addr->sin_family, &(addr->sin_addr), client_host_str, INET6_ADDRSTRLEN);
 
-	printf("Data (%s): %s\n", client_host_str, data->payload);
+	printf("Data (%s): %s\n", client_host_str, msg->payload);
 
-	switch(data->header.message_type)
+	switch(msg->header.message_type)
 	{
 		case MSG_COMMSCHECK: 
 		{
-			send_msg_to_client(client, MSG_COMMSCHECK, "OK", 2);
+			reply_to_msg(client, msg, MSG_COMMSCHECK, "OK", 2);
 			break;	
 		}
 	}
 }
 
-int main() 
+game_server_t* initialize_server()
 {
-	printf("Starting server...\n");
-
 	game_server_t* game_server;
 	int res_server = create_game_server(6969, 
 			conn_callback, 
@@ -62,7 +62,16 @@ int main()
 		fprintf(stderr, "Error: Failed to create server!\n");
 		exit(1);
 	}
+	
+	return game_server;
+}
 
+int main() 
+{
+	printf("Initializing server...\n");
+	game_server_t* game_server = initialize_server();
+
+	printf("Starting server...\n");	
 	int res_servstart = start_game_server(game_server); 
 	if(res_servstart != 0)
 	{
@@ -72,6 +81,7 @@ int main()
 	
 	getchar();
 
+	printf("Shutting down server...\n");
 	destroy_game_server(game_server);
 
 	return 0;

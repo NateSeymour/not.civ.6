@@ -22,8 +22,9 @@ typedef void*(*pthread_routine_t)(void*);
 // Net headers
 typedef struct __attribute__((__packed__)) {
     char magic[12];
+    unsigned short muid;
     unsigned char message_type;
-    short message_length;
+    unsigned short message_length;
     
     char username[20];
     char secret[20];
@@ -75,6 +76,7 @@ int create_game_server(unsigned short port,
         game_server_t** out);
 int start_game_server(game_server_t* game_server);
 void destroy_game_server(game_server_t* game_server);
-void send_msg_to_client(game_client_t* client, unsigned char type, char* payload, size_t payload_len);
+void reply_to_msg(game_client_t* client, sg_message_t* msg, unsigned char type, char* payload, unsigned short payload_len);
+void send_msg_to_client(game_client_t* client, unsigned short muid, unsigned char type, char* payload, unsigned short payload_len);
 
 #endif // _SERVER_H_

@@ -65,7 +65,17 @@ int create_game_server(unsigned short port,
     return 0;
 }
 
-void send_msg_to_client(game_client_t* client, unsigned char type, char* payload, size_t payload_len)
+void kick_client(game_client_t* client)
+{
+
+}
+
+void reply_to_msg(game_client_t* client, sg_message_t* msg, unsigned char type, char* payload, unsigned short payload_len)
+{
+	send_msg_to_client(client, msg->header.muid, type, payload, payload_len);
+}
+
+void send_msg_to_client(game_client_t* client, unsigned short muid, unsigned char type, char* payload, unsigned short payload_len)
 {
 	const size_t header_size = sizeof(sg_header_t);
 	sg_header_t header_buffer;
@@ -92,6 +102,7 @@ void send_msg_to_client(game_client_t* client, unsigned char type, char* payload
 	memcpy(&(header_buffer.username), SERVER_UNAME, strlen(SERVER_UNAME));
 	memcpy(&(header_buffer.secret), SERVER_SECRET, strlen(SERVER_SECRET));
 
+	header_buffer.muid = muid;
 	header_buffer.message_type = type;
 
 	// Create message
