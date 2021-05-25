@@ -47,7 +47,7 @@ typedef struct {
 // Callbacks
 typedef void(*nc6_connection_callback_t)(nc6_client_t*);
 typedef void(*nc6_message_callback_t)(nc6_msg_t*);
-typedef void(*nc6_disconeect_callback_t)(nc6_client_t*);
+typedef void(*nc6_disconnect_callback_t)(nc6_client_t*);
 
 // Server struct
 typedef struct {
@@ -55,21 +55,21 @@ typedef struct {
     uint8_t max_concurrent_connections;
     int status;
 
-    int _sockfd;
-    struct addrinfo* _servinfo;
+    int sockfd;
+    struct addrinfo* servinfo;
 
-    nc6_connection_callback_t _conn_callback;
-    nc6_message_callback_t _msg_callback;
-    nc6_disconeect_callback_t _disc_callback;
+    nc6_connection_callback_t conn_callback;
+    nc6_message_callback_t msg_callback;
+    nc6_disconnect_callback_t disc_callback;
 
-    pthread_t _connection_thread;
-    pthread_mutex_t _connection_pool_m;
-    nc6_client_t* _connection_pool;
-    struct pollfd* _connection_pool_pollfds;
-    size_t _connection_pool_size;
-    size_t _connected_client_count;
+    pthread_t connection_thread;
+    pthread_mutex_t connection_pool_m;
+    nc6_client_t* connection_pool;
+    struct pollfd* connection_pool_pollfds;
+    size_t connection_pool_size;
+    size_t connected_client_count;
 
-    pthread_t _communication_thread;
+    pthread_t communication_thread;
 } nc6_server_t;
 
 // Options struct
@@ -79,9 +79,10 @@ typedef struct {
 
     nc6_connection_callback_t conn_callback;
     nc6_message_callback_t msg_callback;
-    nc6_disconeect_callback_t disc_callback;
+    nc6_disconnect_callback_t disc_callback;
 } nc6_serveropts_t;
 
+// Methods
 int nc6_server_create(nc6_serveropts_t* options, nc6_server_t** out);
 int nc6_server_start(nc6_server_t* nc6_server);
 void nc6_server_destroy(nc6_server_t* game_server);
