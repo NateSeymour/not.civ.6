@@ -1,5 +1,5 @@
 const term = require('terminal-kit').terminal;
-const lib = requrire('./lib');
+const lib = require('./lib');
 
 (async () => {
     term.green('Welcome to not.civ.6 JS client!\n');

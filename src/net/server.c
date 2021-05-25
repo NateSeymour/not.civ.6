@@ -1,34 +1,31 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
-#include <signal.h>
 #include <pthread.h>
 #include <stdlib.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <netdb.h> 
-#include <arpa/inet.h>
-#include <netinet/in.h>
+#include <netdb.h>
 #include <stdio.h>
 
 #include "server.h"
 
-int create_game_server(unsigned short port, 
-		client_connection_callback_t conn_callback,
-		client_disconnect_callback_t disc_callback,
-		client_data_callback_t data_callback,
-		game_server_t** out)
+/// Create a new nc6 server instance
+/// \param options Options for the server (callbacks, port, etc)
+/// \param out Pointer to the new server structure
+/// \return 0 on success. 1 on failure.
+int nc6_server_create(nc6_serveropts_t* options, nc6_server_t** out)
 {
-	game_server_t* game_server = (game_server_t*)malloc(sizeof(game_server_t));
+	nc6_server_t* nc6_server = (nc6_server_t*)malloc(sizeof(nc6_server_t));
 
-	game_server->status = SERVER_STALLED;
-	game_server->port = port;
+    nc6_server->status = SERVER_STALLED;
+    nc6_server->port = options->port;
+    nc6_server->max_concurrent_connections = options->max_concurrent_connections;
 
-	game_server->_conn_callback = conn_callback;
-	game_server->_disc_callback = disc_callback;
-	game_server->_data_callback = data_callback;
+    nc6_server->_conn_callback = options->conn_callback;
+    nc6_server->_disc_callback = options->disc_callback;
+    nc6_server->_msg_callback = options->msg_callback;
 
-	game_server->_connection_pool = NULL;
+    nc6_server->_connection_pool = NULL;
 
 	struct addrinfo hints;
 
@@ -40,90 +37,38 @@ int create_game_server(unsigned short port,
 
 	// Convert port number to a string
 	char port_str[10];
-	snprintf(port_str, sizeof(port_str), "%u", port);
+	snprintf(port_str, sizeof(port_str), "%u", nc6_server->port);
 
-	int res_addrinfo = getaddrinfo(NULL, port_str, &hints, &game_server->_servinfo);
+	int res_addrinfo = getaddrinfo(NULL, port_str, &hints, &nc6_server->_servinfo);
 	if(res_addrinfo != 0)
 	{
+        free(nc6_server);
 		return 1;
 	}
 
-	game_server->_sockfd = socket(game_server->_servinfo->ai_family, game_server->_servinfo->ai_socktype, game_server->_servinfo->ai_protocol);
-	if(game_server->_sockfd == -1)
+    nc6_server->_sockfd = socket(nc6_server->_servinfo->ai_family, nc6_server->_servinfo->ai_socktype, nc6_server->_servinfo->ai_protocol);
+	if(nc6_server->_sockfd == -1)
 	{
+        free(nc6_server);
 		return 1;
 	}
 
 	// Bind the socket to our address
-	int res_bind = bind(game_server->_sockfd, game_server->_servinfo->ai_addr, game_server->_servinfo->ai_addrlen);
+	int res_bind = bind(nc6_server->_sockfd, nc6_server->_servinfo->ai_addr, nc6_server->_servinfo->ai_addrlen);
 	if(res_bind != 0) 
 	{
+        nc6_server_destroy(nc6_server);
 		return 1;
 	}
 
-	*out = game_server;
+	*out = nc6_server;
     return 0;
 }
 
-void kick_client(game_client_t* client)
+_Noreturn void* nc6_server_comms_routine(nc6_server_t* nc6_server)
 {
-
-}
-
-void reply_to_msg(game_client_t* client, sg_message_t* msg, unsigned char type, char* payload, unsigned short payload_len)
-{
-	send_msg_to_client(client, msg->header.muid, type, payload, payload_len);
-}
-
-void send_msg_to_client(game_client_t* client, unsigned short muid, unsigned char type, char* payload, unsigned short payload_len)
-{
-	const size_t header_size = sizeof(sg_header_t);
-	sg_header_t header_buffer;
-
-	const size_t small_msg_size = 1024;
-	char small_msg_buffer[small_msg_size];
-
-	// Use the stack buffer to compose message if it's big enough, otherwise 
-	// allocate RAM dynamically to put it in
-	char* data;
-	size_t message_size = header_size + payload_len;
-	if(message_size > small_msg_size)
-	{
-		data = malloc(message_size);	
-	}
-	else 
-	{
-		data = small_msg_buffer;
-		memset(data, 0, small_msg_size);
-	}
-
-	// Fill header values
-	memcpy(&(header_buffer.magic), PROTOCOL_MAGIC, strlen(PROTOCOL_MAGIC));
-	memcpy(&(header_buffer.username), SERVER_UNAME, strlen(SERVER_UNAME));
-	memcpy(&(header_buffer.secret), SERVER_SECRET, strlen(SERVER_SECRET));
-
-	header_buffer.muid = muid;
-	header_buffer.message_type = type;
-
-	// Create message
-	memcpy(data, &header_buffer, header_size);
-	memcpy(data + header_size, payload, payload_len);
-
-	// Send message
-	// TODO: Make sure that the whole message has been sent
-	send(client->_sockfd, data, message_size, 0);
-
-	// Free RAM if it was dynamically allocated
-	if(data != small_msg_buffer) 
-	{
-		free(data);
-	}		
-}
-
-void* _server_communication_routine(game_server_t* game_server)
-{
-	const size_t header_size = sizeof(sg_header_t);
-	sg_header_t header_buffer;
+	const size_t header_size = sizeof(nc6_header_t);
+	nc6_header_t header_buffer;
 
 	const size_t small_msg_size = 1024;
 	char small_msg_buffer[small_msg_size];
@@ -131,12 +76,12 @@ void* _server_communication_routine(game_server_t* game_server)
 	while(1)
 	{
 		// Poll for incoming data, scanning accross all connections.
-		int count = poll(game_server->_connection_pool_pollfds, game_server->_connected_client_count, 100);
+		int count = poll(nc6_server->_connection_pool_pollfds, nc6_server->_connected_client_count, 100);
 		if(count == 0) continue;
 		
-		for(int i = 0; i < game_server->_connected_client_count; i++)
+		for(int i = 0; i < nc6_server->_connected_client_count; i++)
 		{
-			struct pollfd* pollfd = &(game_server->_connection_pool_pollfds[i]);
+			struct pollfd* pollfd = &(nc6_server->_connection_pool_pollfds[i]);
 
 			// Client has sent data
 			if(pollfd->revents & POLLIN)
@@ -150,20 +95,20 @@ void* _server_communication_routine(game_server_t* game_server)
 					close(pollfd->fd);
 
 					// Call disconnect callback
-					if(game_server->_disc_callback != NULL)
+					if(nc6_server->_disc_callback != NULL)
 					{
-						game_server->_disc_callback(&(game_server->_connection_pool[i]));
+						nc6_server->_disc_callback(&(nc6_server->_connection_pool[i]));
 					}
 	
 					// Remove connection
-					pthread_mutex_lock(&(game_server->_connection_pool_m));
+					pthread_mutex_lock(&(nc6_server->_connection_pool_m));
+
+                    nc6_server->_connection_pool[i] = nc6_server->_connection_pool[nc6_server->_connected_client_count];
+                    nc6_server->_connection_pool_pollfds[i] = nc6_server->_connection_pool_pollfds[nc6_server->_connected_client_count];
 	
-					game_server->_connection_pool[i] = game_server->_connection_pool[game_server->_connected_client_count];
-					game_server->_connection_pool_pollfds[i] = game_server->_connection_pool_pollfds[game_server->_connected_client_count];
-	
-					game_server->_connected_client_count--;
+					nc6_server->_connected_client_count--;
 		
-					pthread_mutex_unlock(&(game_server->_connection_pool_m));
+					pthread_mutex_unlock(&(nc6_server->_connection_pool_m));
 					continue;
 				}
 
@@ -175,12 +120,12 @@ void* _server_communication_routine(game_server_t* game_server)
 				}
 				
 				// Set the message length to host byte order
-				header_buffer.message_length = ntohs(header_buffer.message_length) - sizeof(sg_header_t);
+				header_buffer.message_length = ntohs(header_buffer.message_length) - sizeof(nc6_header_t);
 
 				// If the data fits into the place allocated on the stack, put it there. 
 				// Otherwise space will be dynamically allocated to fit it.
 				char* data;
-				short data_size = header_buffer.message_length;
+				unsigned short data_size = header_buffer.message_length;
 				if(header_buffer.message_length > small_msg_size)
 				{
 					data = malloc(data_size);
@@ -195,13 +140,14 @@ void* _server_communication_routine(game_server_t* game_server)
 				ssize_t payload_received_bytes = recv(pollfd->fd, data, header_buffer.message_length, 0);	
 
 				// Call the callback if available
-				if(game_server->_data_callback != NULL)
+				if(nc6_server->_msg_callback != NULL)
 				{
-					sg_message_t message;
+					nc6_msg_t message;
+					message.client = &(nc6_server->_connection_pool[i]);
 					message.header = header_buffer;
 					message.payload = data;
 
-					game_server->_data_callback(&(game_server->_connection_pool[i]), &message);
+					nc6_server->_msg_callback(&message);
 				}
 
 				if(data != small_msg_buffer)
@@ -213,9 +159,9 @@ void* _server_communication_routine(game_server_t* game_server)
 	}
 }
 
-void* _server_connection_routine(game_server_t* game_server)
+_Noreturn void* nc6_server_connection_routine(nc6_server_t* nc6_server)
 {
-	listen(game_server->_sockfd, 20);
+	listen(nc6_server->_sockfd, 20);
 
 	struct sockaddr incoming_addr;
 	socklen_t addr_size = sizeof(incoming_addr);
@@ -224,92 +170,94 @@ void* _server_connection_routine(game_server_t* game_server)
 	while(1)
 	{
 		// Accept incoming connections
-		int clientfd = accept(game_server->_sockfd, &incoming_addr, &addr_size);
+		int clientfd = accept(nc6_server->_sockfd, &incoming_addr, &addr_size);
+
+		// Check to see if we can handle the connection
+		if(nc6_server->_connected_client_count + 1 > nc6_server->max_concurrent_connections)
+        {
+		    // TODO: send client close notification message
+		    close(clientfd);
+		    continue;
+        }
 
 		// Lock mutex
-		pthread_mutex_lock(&(game_server->_connection_pool_m));
-		
-		// Reallocate connection pool to handle next connection (if not big enough)
-		if(game_server->_connected_client_count + 1 > game_server->_connection_pool_size)
-		{
-			game_server->_connection_pool_size += 10;
-			game_server->_connection_pool = realloc(game_server->_connection_pool, sizeof(game_client_t) * game_server->_connection_pool_size);
-			game_server->_connection_pool_pollfds = realloc(game_server->_connection_pool_pollfds, sizeof(struct pollfd) * game_server->_connection_pool_size);
-		}
+		pthread_mutex_lock(&(nc6_server->_connection_pool_m));
 
 		// Client
-		game_client_t* client = &(game_server->_connection_pool[game_server->_connected_client_count]);
+		nc6_client_t* client = &(nc6_server->_connection_pool[nc6_server->_connected_client_count]);
 		client->_sockfd = clientfd;
 		
 		memcpy(&(client->_addr_info), &incoming_addr, addr_size);
 		
 		// Pollfd entry
-		struct pollfd* pollfd = &(game_server->_connection_pool_pollfds[game_server->_connected_client_count]);
-		pollfd->fd = clientfd;
-		pollfd->events = POLLIN | POLLHUP;
-		pollfd->revents = (short)0;
+		struct pollfd* pollfd = &(nc6_server->_connection_pool_pollfds[nc6_server->_connected_client_count]);
+        pollfd->fd = clientfd;
+        pollfd->events = POLLIN | POLLHUP;
+        pollfd->revents = (short)0;
 
 		// Increment client count
-		game_server->_connected_client_count++;
+		nc6_server->_connected_client_count++;
 
 		// Call connection callback (if exists)
-		if(game_server->_conn_callback != NULL)
+		if(nc6_server->_conn_callback != NULL)
 		{
-			game_server->_conn_callback(client);
+			nc6_server->_conn_callback(client);
 		}
 
 		// Unlock mutex
-		pthread_mutex_unlock(&(game_server->_connection_pool_m));
+		pthread_mutex_unlock(&(nc6_server->_connection_pool_m));
 	}
 }
 
-int start_game_server(game_server_t* game_server)
+int nc6_server_start(nc6_server_t* nc6_server)
 {
 	// Exit if the server is already running
-	if(game_server->status != SERVER_STALLED)
+	if(nc6_server->status != SERVER_STALLED)
 	{
 		return 1;
 	}
 
 	// Initialize RAM for connection pool and pollfd's
-	if(game_server->_connection_pool != NULL)
+	if(nc6_server->_connection_pool != NULL)
 	{
-		free(game_server->_connection_pool);
+		free(nc6_server->_connection_pool);
 	}
 
-	game_server->_connected_client_count = 0;
-	game_server->_connection_pool_size = 20;
-	game_server->_connection_pool = calloc(game_server->_connection_pool_size, sizeof(game_client_t));
+    nc6_server->_connected_client_count = 0;
+    nc6_server->_connection_pool_size = nc6_server->max_concurrent_connections;
+    nc6_server->_connection_pool = calloc(nc6_server->_connection_pool_size, sizeof(nc6_client_t));
 
-	game_server->_connection_pool_pollfds = calloc(game_server->_connection_pool_size, sizeof(struct pollfd));
+    nc6_server->_connection_pool_pollfds = calloc(nc6_server->_connection_pool_size, sizeof(struct pollfd));
 	
 	// Initialize connection routine with mutex for connection list
-	int res_conmutex = pthread_mutex_init(&(game_server->_connection_pool_m), NULL);
+	int res_conmutex = pthread_mutex_init(&(nc6_server->_connection_pool_m), NULL);
 	if(res_conmutex != 0)
 	{
 		return 1;
 	}
 
-	int res_conthread = pthread_create(&(game_server->_connection_thread), NULL, (pthread_routine_t)_server_connection_routine, game_server);
+	int res_conthread = pthread_create(&(nc6_server->_connection_thread), NULL,
+                                       (pthread_routine_t) nc6_server_connection_routine, nc6_server);
 	if(res_conthread != 0)
 	{
 		return 1;
 	}
 
 	// Initialize communication routine
-	int res_comthread = pthread_create(&(game_server->_communication_thread), NULL, (pthread_routine_t)_server_communication_routine, game_server);
+	int res_comthread = pthread_create(&(nc6_server->_communication_thread), NULL,
+                                       (pthread_routine_t) nc6_server_comms_routine, nc6_server);
 	if(res_comthread != 0) 
 	{
 		return 1;
 	}
 
 	// Set server status
-	game_server->status = SERVER_RUNNING;
+	nc6_server->status = SERVER_RUNNING;
 
 	return 0;
 }
 
-void destroy_game_server(game_server_t* game_server)
+void nc6_server_destroy(nc6_server_t* game_server)
 {
 	// Set server status
 	game_server->status = SERVER_STALLED; 

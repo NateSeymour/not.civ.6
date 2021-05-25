@@ -1,14 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
-#include <lua.h>
-#include <lualib.h>
 
-#include "main.h"
 #include "net/server.h"
-#include "game/message.h"
+#include "game/options.h"
 
-void conn_callback(game_client_t* client) 
+void conn_callback(nc6_client_t* client)
 {
 	// Print IP address of connected client
 	char client_host_str[INET6_ADDRSTRLEN];
@@ -19,7 +16,7 @@ void conn_callback(game_client_t* client)
 	printf("New client connected from: %s\n", client_host_str);
 }
 
-void disc_callback(game_client_t* client)
+void disc_callback(nc6_client_t* client)
 {
 	char client_host_str[INET6_ADDRSTRLEN];
 
@@ -29,60 +26,36 @@ void disc_callback(game_client_t* client)
 	printf("Client has disconnected from: %s\n", client_host_str);
 }
 
-void data_callback(game_client_t* client, sg_message_t* msg)
+void msg_callback(nc6_msg_t* msg)
 {
-	char client_host_str[INET6_ADDRSTRLEN];
 
-	struct sockaddr_in* addr = (struct sockaddr_in*)&(client->_addr_info);
-	inet_ntop(addr->sin_family, &(addr->sin_addr), client_host_str, INET6_ADDRSTRLEN);
-
-	printf("Data (%s): %s\n", client_host_str, msg->payload);
-
-	switch(msg->header.message_type)
-	{
-		case MSG_COMMSCHECK: 
-		{
-			reply_to_msg(client, msg, MSG_COMMSCHECK, "OK", 2);
-			break;	
-		}
-	}
-}
-
-game_server_t* initialize_server()
-{
-	game_server_t* game_server;
-	int res_server = create_game_server(6969, 
-			conn_callback, 
-			disc_callback, 
-			data_callback, 
-			&game_server);
-
-	if(res_server != 0)
-	{
-		fprintf(stderr, "Error: Failed to create server!\n");
-		exit(1);
-	}
-	
-	return game_server;
 }
 
 int main() 
 {
-	printf("Initializing server...\n");
-	game_server_t* game_server = initialize_server();
+    // Create game
+    nc6_options_t nc6_options;
+    nc6_options.max_connected_commanders = 8;
+    nc6_options.board_height = 1000;
+    nc6_options.board_width = 1000;
 
-	printf("Starting server...\n");	
-	int res_servstart = start_game_server(game_server); 
-	if(res_servstart != 0)
-	{
-		fprintf(stderr, "Error: Failed to start server!\n");
-		exit(1);
-	}
-	
-	getchar();
+    // Create server
+    nc6_serveropts_t nc6_serveropts;
+    nc6_serveropts.port = 6969;
+    nc6_serveropts.max_concurrent_connections = 255;
+    nc6_serveropts.conn_callback = conn_callback;
+    nc6_serveropts.disc_callback = disc_callback;
+    nc6_serveropts.msg_callback = msg_callback;
 
-	printf("Shutting down server...\n");
-	destroy_game_server(game_server);
+    nc6_server_t* nc6_server;
+
+    if(nc6_server_create(&nc6_serveropts, &nc6_server) != 0)
+    {
+        fprintf(stderr, "Failed to create server!");
+        exit(1);
+    }
+
+
 
 	return 0;
 }

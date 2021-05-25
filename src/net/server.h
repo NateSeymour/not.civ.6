@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <stdint.h>
 
 // Server status
 #define SERVER_RUNNING 0
@@ -22,61 +23,72 @@ typedef void*(*pthread_routine_t)(void*);
 // Net headers
 typedef struct __attribute__((__packed__)) {
     char magic[12];
-    unsigned short muid;
-    unsigned char message_type;
-    unsigned short message_length;
+    uint16_t muid;
+    uint8_t message_type;
+    uint16_t message_length;
     
     char username[20];
     char secret[20];
-} sg_header_t;
+} nc6_header_t;
 
 // Client struct
 typedef struct {
     int _sockfd;
     struct sockaddr _addr_info;
-} game_client_t;
+} nc6_client_t;
 
 // Messages
 typedef struct {
-    sg_header_t header;
+    nc6_client_t* client;
+    nc6_header_t header;
     char* payload;
-} sg_message_t;
+} nc6_msg_t;
 
 // Callbacks
-typedef void(*client_connection_callback_t)(game_client_t*);
-typedef void(*client_data_callback_t)(game_client_t*, sg_message_t*);
-typedef void(*client_disconnect_callback_t)(game_client_t*);
+typedef void(*nc6_connection_callback_t)(nc6_client_t*);
+typedef void(*nc6_message_callback_t)(nc6_msg_t*);
+typedef void(*nc6_disconeect_callback_t)(nc6_client_t*);
 
 // Server struct
 typedef struct {
-    short port;
+    uint16_t port;
+    uint8_t max_concurrent_connections;
     int status;
 
     int _sockfd;
     struct addrinfo* _servinfo;
 
-    client_connection_callback_t _conn_callback;
-    client_data_callback_t _data_callback;
-    client_disconnect_callback_t _disc_callback;
+    nc6_connection_callback_t _conn_callback;
+    nc6_message_callback_t _msg_callback;
+    nc6_disconeect_callback_t _disc_callback;
 
     pthread_t _connection_thread;
     pthread_mutex_t _connection_pool_m;
-    game_client_t* _connection_pool;
+    nc6_client_t* _connection_pool;
     struct pollfd* _connection_pool_pollfds;
     size_t _connection_pool_size;
     size_t _connected_client_count;
 
     pthread_t _communication_thread;
-} game_server_t;
+} nc6_server_t;
 
-int create_game_server(unsigned short port, 
-        client_connection_callback_t conn_callback,
-        client_disconnect_callback_t disc_callback,
-        client_data_callback_t data_callback,
-        game_server_t** out);
-int start_game_server(game_server_t* game_server);
-void destroy_game_server(game_server_t* game_server);
-void reply_to_msg(game_client_t* client, sg_message_t* msg, unsigned char type, char* payload, unsigned short payload_len);
-void send_msg_to_client(game_client_t* client, unsigned short muid, unsigned char type, char* payload, unsigned short payload_len);
+// Options struct
+typedef struct {
+    uint16_t port;
+    uint8_t max_concurrent_connections;
+
+    nc6_connection_callback_t conn_callback;
+    nc6_message_callback_t msg_callback;
+    nc6_disconeect_callback_t disc_callback;
+} nc6_serveropts_t;
+
+int nc6_server_create(nc6_serveropts_t* options, nc6_server_t** out);
+int nc6_server_start(nc6_server_t* nc6_server);
+void nc6_server_destroy(nc6_server_t* game_server);
+
+void nc6_msg_reply(nc6_msg_t* msg, uint8_t type, char* payload, uint16_t payload_len);
+void nc6_msg_send(nc6_client_t* client, uint16_t muid, uint8_t type, char* payload, uint16_t payload_len);
+
+void nc6_client_kick(nc6_client_t* client);
 
 #endif // _SERVER_H_

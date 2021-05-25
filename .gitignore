@@ -2,3 +2,4 @@
 .idea
 build
 client/node_modules
+cmake-*
